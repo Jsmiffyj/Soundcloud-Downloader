@@ -1,111 +1,155 @@
 import os
 import subprocess
+import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext
+from tkinter import filedialog, scrolledtext
 from tkinter.ttk import Progressbar, Style, Combobox
-import time
 
-def download_audio():
-    # Clear any previous status messages before starting a new download
-    status_text.set("Downloading...")  # Initial status message
-    progress_bar['value'] = 0
+# Function to get available audio formats
+def get_audio_formats(url, oauth_token):
+    try:
+        command = f'yt-dlp -F "{url}"'
+        if oauth_token:
+            command += f' --add-header "Authorization: OAuth {oauth_token}"'
+        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        formats = result.stdout.split("\n")
+        formatted_output = "\n".join([line for line in formats if line.strip() and not line.startswith("[info]")])
+        return formatted_output
+    except Exception as e:
+        return f"Error fetching formats: {str(e)}"
+
+# Function to display available formats
+def show_audio_formats():
+    url = url_entry.get("1.0", tk.END).strip().split("\n")[0]
+    oauth_token = oauth_entry.get().strip()
+    if not url:
+        return
+
+    formats = get_audio_formats(url, oauth_token)
+
+    format_window = tk.Toplevel(root)
+    format_window.title("Available Formats")
+    format_window.geometry("600x400")
+    format_window.resizable(True, True)
+
+    text_area = scrolledtext.ScrolledText(format_window, wrap=tk.WORD, height=20, width=70)
+    text_area.insert(tk.END, formats)
+    text_area.pack(padx=10, pady=10, expand=True, fill=tk.BOTH)
+    text_area.config(state=tk.DISABLED)
+
+# Function to update progress bar smoothly
+def update_progress(value):
+    progress_bar["value"] = value
     root.update_idletasks()
 
-    # Get URLs and check for validity
+# Function to handle audio download
+def download_audio():
+    threading.Thread(target=download_audio_thread, daemon=True).start()
+
+def download_audio_thread():
     urls = url_entry.get("1.0", tk.END).strip().split("\n")
-    if not urls or urls == ['']:
-        messagebox.showwarning("Warning", "Please enter at least one SoundCloud URL.")
+    oauth_token = oauth_entry.get().strip()
+    if not urls or urls == [""]:
         return
-    
+
     output_folder = filedialog.askdirectory(title="Select Output Folder")
     if not output_folder:
         return
-    
+
     selected_format = format_var.get()
+    progress_bar["value"] = 0
+    status_text.set("Downloading...")
+    root.update_idletasks()
 
     total_urls = len(urls)
     for index, url in enumerate(urls, start=1):
         if url.strip():
-            command = f'yt-dlp -o "{output_folder}/%(title)s.%(ext)s" --embed-thumbnail --embed-metadata -f bestaudio "{url}" '
+            # Download best available audio quality
+            command = f'yt-dlp -o "{output_folder}/%(title)s.%(ext)s" --embed-thumbnail --embed-metadata -f bestaudio "{url}"'
+            if oauth_token:
+                command += f' --add-header "Authorization: OAuth {oauth_token}"'
             subprocess.run(command, shell=True)
-            progress_bar['value'] = (index / total_urls) * 100
-            root.update_idletasks()
+
+            update_progress((index / total_urls) * 100)
 
     convert_audio(output_folder, selected_format)
-    
-    # Reset status text to 'Download and conversion complete!' after process finishes
-    status_text.set("Download and conversion complete!")
-    
-    # Only show the completion message box once
-    if not hasattr(download_audio, "completed"):
-        messagebox.showinfo("Done", "Download and conversion complete!")
-        download_audio.completed = True  # Mark as completed
+    status_text.set("Download & Conversion Complete")
 
-# Reset the flag when a new download is started
-def reset_download():
-    # Clear previous status and reset completion flag
-    status_text.set("Ready")
-    download_audio.completed = False  # Reset the flag for new download
-    progress_bar['value'] = 0
-
-
+# Function to convert audio files
 def convert_audio(output_folder, selected_format):
     for file in os.listdir(output_folder):
         file_path = os.path.join(output_folder, file)
-        
-        # Check for the file format and whether it's already converted
-        if file.endswith(".opus") or file.endswith(".aac"):
+
+        if file.endswith((".m4a", ".opus", ".flac", ".aiff", ".aac")):
             new_file = file_path.rsplit(".", 1)[0] + f".{selected_format}"
-            
-            # Check if the new file already exists, if it does, add a suffix
-            if os.path.exists(new_file):
-                timestamp = time.strftime("%Y%m%d%H%M%S")
-                new_file = file_path.rsplit(".", 1)[0] + f"_{timestamp}.{selected_format}"
-            
-            subprocess.run(f'ffmpeg -i "{file_path}" -ar 44100 -ac 2 -q:a 0 -map_metadata 0:s:a:0 "{new_file}"', shell=True)
+            conversion_command = f'ffmpeg -i "{file_path}" -ar 44100 -ac 2 -q:a 0 -map_metadata 0:s:a:0 "{new_file}"'
+            subprocess.run(conversion_command, shell=True)
             os.remove(file_path)
-            
-            if selected_format == "mp3":
-                thumbnail = new_file.replace(".mp3", ".png")
-                if os.path.exists(thumbnail):
-                    final_mp3 = new_file.replace(".mp3", "_with_thumbnail.mp3")
-                    subprocess.run(f'ffmpeg -i "{new_file}" -i "{thumbnail}" -map 0 -map 1 -c copy -id3v2_version 3 "{final_mp3}"', shell=True)
-                    os.remove(new_file)
-                    os.rename(final_mp3, new_file)
-                    os.remove(thumbnail)
+            file_path = new_file  # Update file path to converted file
+
+        # Embed thumbnail
+        if file_path.endswith(selected_format):
+            base_name = file_path.rsplit(".", 1)[0]
+            for ext in [".png", ".jpg"]:
+                thumbnail_path = base_name + ext
+                if os.path.exists(thumbnail_path):
+                    try:
+                        subprocess.run(f'ffmpeg -i "{file_path}" -i "{thumbnail_path}" -map 0:a -map 1:v -c:a copy -c:v mjpeg -map_metadata 0:s:a:0 -id3v2_version 3 "{file_path}"', shell=True)
+                        os.remove(thumbnail_path)  # Remove thumbnail after embedding
+                        break
+                    except Exception as e:
+                        print(f"Error embedding thumbnail: {str(e)}")
+                        continue
 
 # GUI Setup
 root = tk.Tk()
 root.title("SoundCloud Downloader")
-root.geometry("500x400")
+root.geometry("520x520")
+root.configure(bg="#2c3e50")  # Dark background
 root.resizable(False, False)
 
 style = Style()
-style.configure("TButton", font=("Arial", 10, "bold"), padding=5)
-style.configure("TLabel", font=("Arial", 10))
+style.configure("TButton", font=("Arial", 10, "bold"), padding=6, background="#3498db", foreground="white")
+style.configure("TLabel", font=("Arial", 10, "bold"), background="#2c3e50", foreground="white")
 
-frame = tk.Frame(root, padx=10, pady=10)
-frame.pack(pady=20)
+frame = tk.Frame(root, padx=10, pady=10, bg="#2c3e50")
+frame.pack(pady=15)
 
-tk.Label(frame, text="Enter SoundCloud URLs (one per line):", font=("Arial", 12, "bold")).pack()
-url_entry = scrolledtext.ScrolledText(frame, height=5, width=50)
-url_entry.pack()
+#Soundcloud URL Input Box
+tk.Label(frame, text="Enter SoundCloud URLs (one per line):", font=("Arial", 12, "bold"), bg="#2c3e50", fg="white").pack()
+url_entry = scrolledtext.ScrolledText(frame, height=5, width=55, bg="#34495e", fg="white", insertbackground="white")
+url_entry.pack(pady=5)
 
-tk.Label(frame, text="Select Output Format:", font=("Arial", 10, "bold")).pack(pady=5)
+#Enter OAuth Token Input Box
+tk.Label(frame, text="Enter OAuth Token (optional):", font=("Arial", 10, "bold"), bg="#2c3e50", fg="white").pack(pady=5)
+oauth_entry = tk.Entry(frame, show="*", bg="#34495e", fg="white", insertbackground="white")
+oauth_entry.pack()
+
+#Select Output Format Dropdown
+tk.Label(frame, text="Select Output Format:", font=("Arial", 10, "bold"), bg="#2c3e50", fg="white").pack(pady=5)
 format_var = tk.StringVar()
 format_combobox = Combobox(frame, textvariable=format_var, values=["mp3", "wav", "flac", "aiff", "aac", "opus"], state="readonly")
-format_combobox.set("mp3")  # Default selection
+format_combobox.set("mp3")
 format_combobox.pack()
 
-download_button = tk.Button(frame, text="Download", command=download_audio, font=("Arial", 12, "bold"), bg="#4CAF50", fg="white")
+#Show Available Formats Button
+formats_button = tk.Button(frame, text="Show Available Formats", command=show_audio_formats, font=("Arial", 10, "bold"), bg="#e67e22", fg="white", relief="flat")
+formats_button.pack(pady=10)
+
+#Download Button
+download_button = tk.Button(frame, text="Download", command=download_audio, font=("Arial", 12, "bold"), bg="#27ae60", fg="white", relief="flat")
 download_button.pack(pady=5)
 
+#Download/Conversion Status
 status_text = tk.StringVar()
 status_text.set("Ready")
-status_label = tk.Label(frame, textvariable=status_text, font=("Arial", 10, "italic"))
+status_label = tk.Label(frame, textvariable=status_text, font=("Arial", 10, "italic"), bg="#2c3e50", fg="white")
 status_label.pack()
 
-progress_bar = Progressbar(frame, length=400, mode="determinate")
+#Progress Bar
+progress_bar = Progressbar(frame, length=420, mode="determinate", style="Horizontal.TProgressbar")
 progress_bar.pack(pady=10)
+
+style.configure("Horizontal.TProgressbar", background="#1abc9c", troughcolor="#34495e", thickness=10)
 
 root.mainloop()
