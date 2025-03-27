@@ -82,7 +82,7 @@ def convert_audio(output_folder, selected_format):
 
         if file.endswith((".m4a", ".opus", ".flac", ".aiff", ".aac")):
             new_file = file_path.rsplit(".", 1)[0] + f".{selected_format}"
-            conversion_command = f'ffmpeg -i "{file_path}" -ar 44100 -ac 2 -q:a 0 -map_metadata 0:s:a:0 "{new_file}"'
+            conversion_command = f'ffmpeg -i "{file_path}" -ar 44100 -ac 2 -q:a 0 -map_metadata 0 "{new_file}"'
             subprocess.run(conversion_command, shell=True)
             os.remove(file_path)
             file_path = new_file  # Update file path to converted file
@@ -94,7 +94,7 @@ def convert_audio(output_folder, selected_format):
                 thumbnail_path = base_name + ext
                 if os.path.exists(thumbnail_path):
                     try:
-                        subprocess.run(f'ffmpeg -i "{file_path}" -i "{thumbnail_path}" -map 0:a -map 1:v -c:a copy -c:v mjpeg -map_metadata 0:s:a:0 -id3v2_version 3 "{file_path}"', shell=True)
+                        subprocess.run(f'ffmpeg -i "{file_path}" -i "{thumbnail_path}" -map 0:a -map 1:v -c:a copy -c:v mjpeg -map_metadata 0 -id3v2_version 3 "{file_path}"', shell=True)
                         os.remove(thumbnail_path)  # Remove thumbnail after embedding
                         break
                     except Exception as e:
