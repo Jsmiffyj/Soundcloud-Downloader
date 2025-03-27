@@ -1,7 +1,11 @@
 # Soundcloud-Downloader
 Python script w/ GUI to download non GO+ songs from Soundcloud
 
+
+
+
 ![image](https://github.com/user-attachments/assets/c561c596-4068-4e49-ab08-edf58a5260a9)
+
 
 
 Requirements:
@@ -10,6 +14,8 @@ ffmpeg (for converting file type) - https://www.ffmpeg.org
 python
 
 -------------------------------------------------------------------
+
+
 
 Created using own skills and a bit of ChatGPT, this script is used to download songs from Soundcloud in the highest quality.
 
